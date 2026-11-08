@@ -1,0 +1,10 @@
+# Normalize line endings for portability.
+* text=auto eol=lf
+
+# Windows scripts: keep them runnable either way, but store LF (PowerShell handles it).
+*.ps1 text eol=lf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+*.jar binary
+*.png binary
+*.zip binary

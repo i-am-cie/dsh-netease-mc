@@ -1,0 +1,29 @@
+modLoader = "javafml"
+loaderVersion = "[3,)"
+license = "MIT"
+issueTrackerURL = "https://github.com/i-am-cie/dsh-netease-mc/issues"
+
+[[mods]]
+modId = "netease_mc_link"
+version = "1.0.0"
+displayName = "Netease MC Link"
+authors = "dsh-netease-mc"
+description = '''
+Local-only HTTP bridge for the DeepSeek Harness (DSH) NetEase Minecraft integration.
+Listens on 127.0.0.1:38210 with token authentication and exposes read/command/chat/action
+endpoints equivalent to the DSH bridge MCP tools. See docs/ARCHITECTURE.md section 5.
+'''
+
+[[dependencies.netease_mc_link]]
+modId = "neoforge"
+type = "required"
+versionRange = "[21.8,)"
+ordering = "NONE"
+side = "BOTH"
+
+[[dependencies.netease_mc_link]]
+modId = "minecraft"
+type = "required"
+versionRange = "[1.21.8]"
+ordering = "NONE"
+side = "BOTH"

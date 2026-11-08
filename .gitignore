@@ -1,0 +1,33 @@
+# dependencies & builds
+node_modules/
+packages/*/node_modules/
+packages/mod/build/
+packages/mod/out/
+dist/
+build/
+*.class
+.gradle/
+
+# local config / secrets — never commit
+dsh-mc.config.json
+.env
+.env.*
+!.env.example
+**/config/netease_mc_link.json
+*.pem
+*.key
+
+# test & runtime artifacts
+test-servers/
+test-run/
+*.log
+logs/
+crash-reports/
+run/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp

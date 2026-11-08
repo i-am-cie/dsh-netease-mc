@@ -1,0 +1,125 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bridge-tests:
+    name: Bridge unit tests (node --test)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Show tool versions
+        shell: pwsh
+        run: |
+          node --version
+          npm --version
+
+      - name: Install bridge dependencies
+        shell: pwsh
+        run: |
+          $bridge = 'packages/bridge'
+          if (-not (Test-Path (Join-Path $bridge 'package.json'))) {
+            Write-Host "::notice::$bridge/package.json not found, skipping install"
+            exit 0
+          }
+          Push-Location $bridge
+          try {
+            if (Test-Path 'package-lock.json') {
+              npm ci --no-audit --no-fund
+            } else {
+              npm install --no-audit --no-fund
+            }
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+
+      - name: Run unit tests
+        shell: pwsh
+        run: |
+          $bridge = 'packages/bridge'
+          if (-not (Test-Path (Join-Path $bridge 'package.json'))) {
+            Write-Host "::notice::bridge package missing, skipping tests"
+            exit 0
+          }
+          Push-Location $bridge
+          try {
+            if (-not (Test-Path 'test')) {
+              Write-Host "::notice::no test directory, skipping node --test"
+              exit 0
+            }
+            node --test
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          } finally {
+            Pop-Location
+          }
+
+  mod-syntax:
+    name: Mod Java syntax check
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        if: ${{ hashFiles('packages/mod/**/*.java') != '' }}
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Parse Java sources (offline, dependency errors tolerated)
+        shell: pwsh
+        run: |
+          $src = 'packages/mod/src'
+          if (-not (Test-Path $src)) {
+            Write-Host "::notice::$src not found, skipping Java syntax check"
+            exit 0
+          }
+          $files = @(Get-ChildItem -Path $src -Recurse -Filter *.java -File | ForEach-Object { $_.FullName })
+          if ($files.Count -eq 0) {
+            Write-Host "::notice::no .java files under $src"
+            exit 0
+          }
+          $outDir = Join-Path $env:RUNNER_TEMP 'mod-parse-out'
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+
+          # Full compilation needs the NeoForge/Minecraft classpath which is not
+          # available on a clean runner. We therefore only fail on real syntax
+          # errors and tolerate "missing dependency" diagnostics. Force English
+          # diagnostics so the filter also works on localized JDKs.
+          $raw = & javac '-J-Duser.language=en' '-J-Duser.country=US' -proc:none -nowarn -d $outDir $files 2>&1
+          $exitCode = $LASTEXITCODE
+          $lines = @($raw | ForEach-Object { "$_" })
+          $syntax = @($lines | Where-Object {
+            $_ -match 'error:' -and
+            $_ -notmatch 'does not exist' -and
+            $_ -notmatch 'cannot find symbol' -and
+            $_ -notmatch 'cannot access' -and
+            $_ -notmatch 'package .* not found' -and
+            $_ -notmatch 'bad class file'
+          })
+          if ($syntax.Count -gt 0) {
+            Write-Host 'Java syntax errors detected:'
+            $syntax | Select-Object -First 40 | ForEach-Object { Write-Host $_ }
+            exit 1
+          }
+          $dependencyErrors = @($lines | Where-Object { $_ -match 'error:' })
+          Write-Host "Java sources parsed: $($files.Count) file(s); javac exit=$exitCode; tolerated dependency diagnostics=$($dependencyErrors.Count)"
+          Write-Host 'OK: no syntax errors (missing game/NeoForge types are expected offline).'

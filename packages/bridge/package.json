@@ -1,0 +1,26 @@
+{
+  "name": "dsh-netease-mc-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "MCP bridge for NetEase Minecraft Java Edition: zero-dependency MCP server with an optional mineflayer (bot) channel and an in-game mod HTTP channel.",
+  "type": "commonjs",
+  "main": "src/index.js",
+  "bin": {
+    "dsh-netease-mc-bridge": "src/index.js"
+  },
+  "scripts": {
+    "start": "node src/index.js serve",
+    "test": "node --test",
+    "agent": "node src/index.js agent",
+    "doctor": "node src/index.js doctor",
+    "probe": "node src/index.js probe",
+    "e2e": "node test/e2e/run-e2e.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "mineflayer": "^4.39.0"
+  },
+  "license": "MIT"
+}
