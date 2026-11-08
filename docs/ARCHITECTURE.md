@@ -145,6 +145,23 @@
 - 读类工具超时 10s，写类工具 35s，`mc_command` 15s。
 - 每个工具调用记录 `{ts, tool, args, ok, ms}` 到日志（不记录聊天内容之外的敏感信息）。
 
+### 通道 B 的 v1 兼容降级（实现已落地）
+
+模组 v1 的 `POST /action` 只实现 `tp|give|setblock|summon|time|weather|gamemode|effect|kill`，
+因此 bridge 对 `mc_move`/`mc_mine`/`mc_place`/`mc_attack` 采用「先试 `/action`，遇
+`unsupported_action`/`not_found` 再走 `/command`」的降级策略（见 `src/game/mod.js#actionWithFallback`）：
+
+| 工具 | 降级命令 |
+|---|---|
+| `mc_move`（坐标/玩家） | `tp <player> <x> <y> <z>` / `tp <player> <target>` |
+| `mc_move`（lookAt） | `tp <player> ~ ~ ~ <yaw> <pitch>` |
+| `mc_mine` | `setblock <x> <y> <z> air destroy` |
+| `mc_place` | `setblock <x> <y> <z> <item>` |
+| `mc_attack` | `damage @e[type=!player,limit=1,sort=nearest] 5` |
+| `mc_use` | 无等价命令 → 返回 `unsupported_in_mod_mode`（明确失败，不伪造成功） |
+| `mc_chat`（读） | 模组 v1 不记录聊天历史 → 返回空列表 + `note` 字段 |
+
+
 ## 5. 游戏内模组 HTTP 契约（通道 B）
 
 - 监听 `127.0.0.1:38210`（可配置，仅本机）。

@@ -142,6 +142,29 @@ class ModChannel {
     return payload || {};
   }
 
+  /**
+   * Some tools have no dedicated mod endpoint: try `/action` first and, when the
+   * mod answers `unsupported_action` (v1 of the mod only implements the
+   * tp|give|setblock|summon|time|weather|gamemode|effect|kill verbs), fall back
+   * to the equivalent vanilla command through `/command`. This keeps the MCP
+   * tool contract stable while tolerating an older in-game mod build.
+   */
+  async actionWithFallback(body, fallbackCommand) {
+    try {
+      return await this.request('POST', '/action', { body });
+    } catch (err) {
+      const code = err && err.code;
+      const retryable =
+        code === 'unsupported_action' ||
+        code === 'not_found' ||
+        code === 'mod_not_found' ||
+        code === 'mod_not_supported';
+      if (!retryable || !fallbackCommand) throw err;
+      const result = await this.request('POST', '/command', { body: { command: fallbackCommand } });
+      return { ...result, action: body.type, fallback: 'command', command: fallbackCommand };
+    }
+  }
+
   async health() {
     return this.request('GET', '/health', { auth: false, timeoutMs: HEALTH_TIMEOUT_MS });
   }
@@ -289,7 +312,30 @@ class ModChannel {
     if (args.lookAt) body.lookAt = { x: args.lookAt.x, y: args.lookAt.y, z: args.lookAt.z };
     if (Number.isFinite(args.timeoutMs)) body.timeoutMs = args.timeoutMs;
 
-    const result = await this.request('POST', '/action', { body });
+    // No "move" verb in the v1 mod API: fall back to /tp, including look direction.
+    let fallback = null;
+    const playerName = before.player && before.player.name ? before.player.name : null;
+    if (playerName && args.stop !== true) {
+      if (args.player) {
+        fallback = `tp ${playerName} ${String(args.player)}`;
+      } else if (hasCoordinates) {
+        const x = Number.isFinite(args.x) ? args.x : from.x;
+        const y = Number.isFinite(args.y) ? args.y : from.y;
+        const z = Number.isFinite(args.z) ? args.z : from.z;
+        fallback = `tp ${playerName} ${x} ${y} ${z}`;
+      } else if (args.lookAt) {
+        const eyeY = Number.isFinite(from.y) ? from.y + 1.62 : 64;
+        const dx = Number(args.lookAt.x) - Number(from.x || 0);
+        const dy = Number(args.lookAt.y) - eyeY;
+        const dz = Number(args.lookAt.z) - Number(from.z || 0);
+        const horizontal = Math.sqrt(dx * dx + dz * dz) || 1e-6;
+        const yaw = (Math.atan2(-dx, dz) * 180) / Math.PI;
+        const pitch = (-Math.atan2(dy, horizontal) * 180) / Math.PI;
+        fallback = `tp ${playerName} ~ ~ ~ ${yaw.toFixed(3)} ${pitch.toFixed(3)}`;
+      }
+    }
+
+    const result = await this.actionWithFallback(body, fallback);
     let to = null;
     if (result.player && typeof result.player === 'object') {
       to = positionFrom(result.player);
@@ -322,7 +368,13 @@ class ModChannel {
     if (args.block) body.block = String(args.block);
     if (Number.isFinite(args.count)) body.count = args.count;
 
-    const result = await this.request('POST', '/action', { body });
+    // v1 mod API has no "mine": destroy the target block with /setblock ... air destroy.
+    const mineFallback =
+      Number.isFinite(args.x) && Number.isFinite(args.y) && Number.isFinite(args.z)
+        ? `setblock ${args.x} ${args.y} ${args.z} air destroy`
+        : null;
+
+    const result = await this.actionWithFallback(body, mineFallback);
     let mined = Array.isArray(result.mined) ? result.mined : [];
     if (mined.length === 0 && Number.isFinite(args.x) && Number.isFinite(args.y) && Number.isFinite(args.z)) {
       const block = await this.mc_block({ x: args.x, y: args.y, z: args.z });
@@ -346,7 +398,10 @@ class ModChannel {
     }
     const body = { type: 'place', x, y, z };
     if (args.item) body.item = String(args.item);
-    const result = await this.request('POST', '/action', { body });
+    // v1 mod API has no "place": fall back to /setblock with the requested block id.
+    const rawBlock = String(args.item || body.item || 'minecraft:stone');
+    const blockId = rawBlock.includes(':') ? rawBlock : `minecraft:${rawBlock}`;
+    const result = await this.actionWithFallback(body, `setblock ${x} ${y} ${z} ${blockId}`);
     let name = result.placed && result.placed.name ? result.placed.name : result.block ? result.block : null;
     if (!name) {
       try {
@@ -366,7 +421,18 @@ class ModChannel {
     const body = { type: 'use' };
     if (args.item) body.item = String(args.item);
     if (args.offhand === true) body.offhand = true;
-    const result = await this.request('POST', '/action', { body });
+    let result;
+    try {
+      result = await this.request('POST', '/action', { body });
+    } catch (err) {
+      const code = err && err.code;
+      if (code === 'unsupported_action' || code === 'not_found' || code === 'mod_not_found' || code === 'mod_not_supported') {        throw new ToolError(
+          'unsupported_in_mod_mode',
+          'mc_use has no equivalent in the v1 in-game mod; use mc_command (e.g. "effect give <player> ...") or switch mode=bot'
+        );
+      }
+      throw err;
+    }
     return normalize.use({
       item: result.item || args.item || null,
       offhand: args.offhand === true || result.offhand === true,
@@ -377,7 +443,11 @@ class ModChannel {
   async mc_attack(args = {}) {
     const body = { type: 'attack', nearest: args.nearest !== false };
     if (Number.isFinite(args.entityId)) body.entityId = args.entityId;
-    const result = await this.request('POST', '/action', { body });
+    // v1 mod API has no "attack": damage the nearest non-player entity.
+    const result = await this.actionWithFallback(
+      body,
+      'damage @e[type=!player,limit=1,sort=nearest] 5'
+    );
     const entity = result.entity || result.attacked || {};
     return normalize.attack({
       entity: {
@@ -391,8 +461,24 @@ class ModChannel {
     const isRead = args.read === true || (args.read === undefined && args.message === undefined);
     if (isRead) {
       const limit = Number.isFinite(args.limit) ? Math.min(100, Math.max(1, Math.trunc(args.limit))) : 20;
-      const payload = await this.request('GET', '/chat', { query: { limit } });
-      return normalize.chatMessages(payload.messages || []);
+      try {
+        const payload = await this.request('GET', '/chat', { query: { limit } });
+        return normalize.chatMessages(payload.messages || []);
+      } catch (err) {
+        const code = err && err.code;
+        if (
+          code === 'not_found' ||
+          code === 'mod_not_found' ||
+          code === 'mod_not_supported' ||
+          code === 'method_not_allowed'
+        ) {
+          // The v1 mod captures no chat history; report an empty list instead of failing.
+          const empty = normalize.chatMessages([]);
+          empty.note = 'the v1 in-game mod does not capture chat history; use mode=bot to read chat';
+          return empty;
+        }
+        throw err;
+      }
     }
     const message = String(args.message ?? '').slice(0, 256);
     if (!message) throw new ToolError('invalid_arguments', 'mc_chat needs a message to send (or read=true to read chat)');
