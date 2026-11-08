@@ -130,6 +130,13 @@ powershell -ExecutionPolicy Bypass -File scripts\install.ps1 -InstallMod
 
 > 模组只监听 `127.0.0.1`，强制 token 鉴权，未在真机加载验证前请自行评估风险
 > （见 [docs/SECURITY.md](docs/SECURITY.md)）。
+>
+> 不想自己编译也可以直接下载 [Releases](https://github.com/i-am-cie/dsh-netease-mc/releases)
+> 里的 `netease-mc-link-1.0.0.jar`。
+>
+> 让 DSH 的 MCP 子进程稳定拿到 token 的推荐做法：在
+> `%USERPROFILE%\.dsh\profiles\desktop\cordis.patch.yml` 的 `mcp-netease-mc` 条目
+> `env:` 下加一行 `DSH_MC_TOKEN: '<token>'`（`setx` 只影响新进程，DSH 需重启才生效）。
 
 ### 3. 重启 DSH，验证工具
 
